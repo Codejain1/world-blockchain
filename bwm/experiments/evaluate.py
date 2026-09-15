@@ -20,6 +20,7 @@ from ..environment.scenarios import SCENARIO_KIND, make_scenario, sample_train_c
 from ..evaluation.benchmark import (composite_index, control_table,
                                     counterfactual_table, prediction_table)
 from ..evaluation.control import (regret_table, run_policy_episode, summarize_control)
+from ..evaluation.stats import compare_to_reference, significance_table
 from ..evaluation.counterfactual import collect_probes, evaluate_counterfactual
 from ..evaluation.prediction import (evaluate_prediction, reference_predictions,
                                      sample_eval_batches)
@@ -192,8 +193,23 @@ def run_control_stage(bundle: TrainedBundle, cfg: Config, verbose: bool = True
     regrets = {}
     for sc in scenarios:
         regrets[sc] = regret_table({p: results[p][sc] for p in results if sc in results[p]})
+
+    # Paired significance: every policy saw the same episode seeds, so the
+    # comparison is paired and a sign-flip test is exact at this sample size.
+    ref = "noop" if "noop" in results else next(iter(results))
+    sig = compare_to_reference(results, ref, key="total_return",
+                               seed=int(cfg.get_path("experiment.seed", 0)))
+    # The head-to-head claims the hypothesis actually makes.
+    claims = [("wm_plan", "llm"), ("unified", "wm_plan"), ("unified", "llm"),
+              ("wm_plan", "wm_greedy"), ("wm_plan_memory", "wm_plan"),
+              ("unified", "unified_no_memory"), ("unified", "unified_no_rollout"),
+              ("oracle_plan", "wm_plan"), ("planner_no_model", "wm_plan"),
+              ("wm_plan", "buy_and_hold"), ("llm", "noop")]
+    head_to_head = significance_table(results, claims, key="total_return",
+                                      seed=int(cfg.get_path("experiment.seed", 0)))
     return {"summaries": summaries, "regret": regrets, "policy_info": infos,
-            "scenarios": scenarios}
+            "scenarios": scenarios, "significance_vs_reference": sig,
+            "significance_reference": ref, "head_to_head": head_to_head}
 
 
 def _action_space(bundle: TrainedBundle, n_agents: int):

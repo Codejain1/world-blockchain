@@ -168,3 +168,45 @@ def test_target_groups_partition_the_observation_vector(obs_builder):
     assert sorted(core.tolist()) == list(range(obs_builder.obs_dim))
     assert set(g["price_level"].tolist()) <= set(g["price"].tolist())
     assert set(COMPOSITE_GROUPS) == {"agent", "protocol"}
+
+
+# ------------------------------------------------------------ significance
+def test_paired_tests_detect_a_real_effect_and_reject_noise():
+    from bwm.evaluation.stats import paired_bootstrap, paired_permutation_test
+    rng = np.random.default_rng(0)
+    a = rng.normal(0.5, 0.1, 14)
+    b = a - 0.4 + rng.normal(0, 0.02, 14)          # consistent paired effect
+    bs = paired_bootstrap(a, b, seed=0)
+    assert bs["lo"] > 0 and bs["diff"] == pytest.approx(0.4, abs=0.05)
+    assert paired_permutation_test(a, b, seed=0) < 0.01
+
+    c = rng.normal(0.0, 1.0, 14)                    # identical distributions
+    d = rng.normal(0.0, 1.0, 14)
+    assert paired_permutation_test(c, d, seed=0) > 0.05
+
+
+def test_permutation_test_is_exact_and_bounded_for_small_n():
+    from bwm.evaluation.stats import paired_permutation_test
+    # With n=4 the smallest attainable two-sided p-value is 2/2^4 = 0.125,
+    # so no per-scenario claim at n=4 can reach p<0.05.  Worth asserting so
+    # nobody reads a 4-episode result as significant.
+    assert paired_permutation_test([1, 1, 1, 1], [0, 0, 0, 0]) == pytest.approx(0.125)
+    assert paired_permutation_test([1] * 8, [0] * 8) == pytest.approx(2 / 256)
+
+
+def test_compare_to_reference_pairs_by_episode():
+    from bwm.evaluation.control import ControlResult
+    from bwm.evaluation.stats import compare_to_reference
+
+    def mk(name, sc, seed, ret):
+        nw = np.array([100.0, 100.0 * (1 + ret)], np.float32)
+        return ControlResult(name, sc, seed, np.array([ret * 100], np.float32), nw,
+                             np.zeros((1, 10), np.float32), np.zeros(1, np.int64), 0.0)
+
+    per = {"good": {"iid": [mk("good", "iid", s, 0.1) for s in range(6)]},
+           "noop": {"iid": [mk("noop", "iid", s, 0.0) for s in range(6)]}}
+    rows = compare_to_reference(per, "noop")
+    assert len(rows) == 1
+    assert rows[0]["policy"] == "good"
+    assert rows[0]["mean_diff"] == pytest.approx(0.1, abs=1e-6)
+    assert rows[0]["n_pairs"] == 6

@@ -100,6 +100,21 @@ def results_markdown(results: Dict[str, Any]) -> str:
                                ["policy"] + [f"regret@{s}" for s in reg] +
                                ["regret_mean"]), ""]
 
+    h2h = results.get("control", {}).get("head_to_head")
+    if h2h:
+        md += ["### Head-to-head tests (paired over identical episodes)", "",
+               "Every policy ran the same episode seeds, so these are paired "
+               "comparisons: a bootstrap CI on the mean difference in total "
+               "return, plus an exact sign-flip permutation p-value.", "",
+               to_markdown(h2h, ["comparison", "mean_diff", "ci_lo", "ci_hi",
+                                 "p_value", "n_pairs"]), ""]
+    sig = results.get("control", {}).get("significance_vs_reference")
+    if sig:
+        ref = results["control"].get("significance_reference", "noop")
+        md += [f"### Paired comparison against `{ref}`", "",
+               to_markdown(sig, ["policy", "mean_diff", "ci_lo", "ci_hi",
+                                 "p_value", "significant_05", "n_pairs"]), ""]
+
     comp = results.get("composite", {})
     if comp:
         rows = []
@@ -163,6 +178,21 @@ def write_report(results: Dict[str, Any], out_dir: str, make_plots: bool = True)
     for name, rows in tables.items():
         if rows:
             to_csv(rows, os.path.join(out_dir, "tables", f"{name}.csv"))
+    h2h = results.get("control", {}).get("head_to_head")
+    if h2h:
+        md += ["### Head-to-head tests (paired over identical episodes)", "",
+               "Every policy ran the same episode seeds, so these are paired "
+               "comparisons: a bootstrap CI on the mean difference in total "
+               "return, plus an exact sign-flip permutation p-value.", "",
+               to_markdown(h2h, ["comparison", "mean_diff", "ci_lo", "ci_hi",
+                                 "p_value", "n_pairs"]), ""]
+    sig = results.get("control", {}).get("significance_vs_reference")
+    if sig:
+        ref = results["control"].get("significance_reference", "noop")
+        md += [f"### Paired comparison against `{ref}`", "",
+               to_markdown(sig, ["policy", "mean_diff", "ci_lo", "ci_hi",
+                                 "p_value", "significant_05", "n_pairs"]), ""]
+
     comp = results.get("composite", {})
     if comp:
         rows = []
