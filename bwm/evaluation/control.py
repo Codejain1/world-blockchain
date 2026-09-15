@@ -55,7 +55,26 @@ class ControlResult:
             "seconds": self.seconds,
             "action_entropy": _entropy(self.actions),
             "frac_noop": float(np.mean(self.actions == 0)) if self.actions.size else 0.0,
+            **self._adaptation(),
         }
+
+    def _adaptation(self) -> Dict[str, float]:
+        """Within-episode learning-from-consequences signal.
+
+        A system that improves over the course of an episode is adapting to the
+        world it is actually in; one that does not is executing a fixed policy.
+        Measured on normalised per-step reward so it is comparable across
+        wealth levels.
+        """
+        r = self.rewards
+        if r.size < 8:
+            return {"first_half_reward": 0.0, "second_half_reward": 0.0,
+                    "adaptation_delta": 0.0}
+        init = max(abs(float(self.net_worth[0])), 1e-9)
+        h = r.size // 2
+        a, b = float(r[:h].mean()) / init, float(r[h:].mean()) / init
+        return {"first_half_reward": a, "second_half_reward": b,
+                "adaptation_delta": b - a}
 
 
 def _entropy(actions: np.ndarray) -> float:
@@ -144,7 +163,8 @@ def summarize_control(results: Sequence[ControlResult]) -> Dict[str, Any]:
         return {}
     rows = [r.summary() for r in results]
     keys = ["final_wealth_ratio", "total_return", "mean_step_reward", "sharpe",
-            "sortino", "max_drawdown", "action_entropy", "frac_noop", "seconds"]
+            "sortino", "max_drawdown", "action_entropy", "frac_noop", "seconds",
+            "first_half_reward", "second_half_reward", "adaptation_delta"]
     out: Dict[str, Any] = {"policy": rows[0]["policy"], "scenario": rows[0]["scenario"],
                            "n_episodes": len(rows)}
     for k in keys:

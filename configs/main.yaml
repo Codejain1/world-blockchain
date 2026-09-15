@@ -1,0 +1,7 @@
+# The headline experiment reported in docs/RESULTS.md.
+_base_: base.yaml
+
+experiment:
+  name: main
+  out_dir: results/main
+  notes: "Full comparison: 13 predictive systems, 13 control policies, 8 worlds."

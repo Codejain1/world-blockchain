@@ -152,6 +152,10 @@ def summarize_binary(y: np.ndarray, logit: np.ndarray,
             aucs.append(a)
     out["mean_auroc"] = float(np.mean(aucs)) if aucs else float("nan")
     out["per_event"] = per
+    conf, freq, cnt = reliability_curve(y.reshape(-1), p.reshape(-1), n_bins=10)
+    out["reliability"] = {"confidence": np.nan_to_num(conf, nan=-1.0).tolist(),
+                          "frequency": np.nan_to_num(freq, nan=-1.0).tolist(),
+                          "count": cnt.tolist()}
     return out
 
 

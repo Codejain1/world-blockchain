@@ -48,6 +48,16 @@ class WorldModelModule(LossModule):
     latent_dim: int = 0
     #: weight of any architecture-specific regulariser (KL, VICReg, ...)
     aux_weight: float = 1.0
+    #: Decode observations as a *residual* on the previous observation estimate.
+    #:
+    #: Fairness fix.  The flat baselines predict ``obs_{t+1} - obs_t`` directly,
+    #: so at initialisation they output ~0 and therefore start from the strong
+    #: persistence prior.  A world model that decodes absolute observations from
+    #: its latent starts from the dataset mean instead, which is far worse -- an
+    #: architecture-induced handicap that has nothing to do with whether latent
+    #: world models work.  Residual decoding removes it: every system now starts
+    #: at persistence and is scored on what it adds.
+    residual_decode: bool = True
 
     # -- required API ----------------------------------------------------
     def encode(self, b: Dict[str, torch.Tensor]) -> LatentState:
@@ -58,9 +68,23 @@ class WorldModelModule(LossModule):
         """One action-conditioned latent transition (no simulator involved)."""
         raise NotImplementedError
 
-    def readout(self, state: LatentState) -> Dict[str, torch.Tensor]:
-        """Latent -> predicted absolute observation, reward and event logits."""
+    def _readout_raw(self, state: LatentState) -> Dict[str, torch.Tensor]:
+        """Latent -> (residual or absolute) observation, reward, event logits."""
         raise NotImplementedError
+
+    def readout(self, state: LatentState) -> Dict[str, torch.Tensor]:
+        out = self._readout_raw(state)
+        if self.residual_decode and "obs_prev" in state:
+            out = dict(out)
+            out["obs"] = state["obs_prev"] + out["obs"]
+        return out
+
+    @staticmethod
+    def advance(state: LatentState, out: Dict[str, torch.Tensor]) -> LatentState:
+        """Carry the predicted observation forward as the next residual anchor."""
+        nxt = dict(state)
+        nxt["obs_prev"] = out["obs"]
+        return nxt
 
     def aux_loss(self, state: LatentState, b: Dict[str, torch.Tensor],
                  step: int) -> torch.Tensor:
@@ -74,8 +98,10 @@ class WorldModelModule(LossModule):
         outs, states = [], []
         for l in range(horizon):
             state = self.imagine(state, b["fut_act"][:, l])
-            outs.append(self.readout(state))
+            out = self.readout(state)
+            outs.append(out)
             states.append(state)
+            state = self.advance(state, out)
         return outs, states
 
     def loss(self, b: Dict[str, torch.Tensor], horizon: Optional[int] = None
@@ -147,6 +173,7 @@ class LatentWorldModel(TorchPredictiveModel):
                 obs.append(o["obs"])
                 ev.append(o["event_logit"])
                 rw.append(o["reward"])
+                state = self.module.advance(state, o)
         B = int(batch["obs_hist"].shape[0])
         self.imagined_steps += B * horizon
         self.meter.imagined_steps += B * horizon
@@ -183,6 +210,7 @@ class LatentWorldModel(TorchPredictiveModel):
             rewards.append(o["reward"])
             events.append(o["event_logit"])
             obs.append(o["obs"])
+            state = self.module.advance(state, o)
         n = int(actions.shape[0]) * L
         self.imagined_steps += n
         self.meter.imagined_steps += n

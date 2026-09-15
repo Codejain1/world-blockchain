@@ -287,8 +287,14 @@ class BlockchainWorld:
             frac = float(np.clip(0.15 + 0.35 * rng.random(), 0.0, 0.9)) * mag
             frac = min(frac, 0.9)
             holders = np.where(st.lp_shares[:, p] > 0)[0]
+            ta, tb = cfg.pools[p]
             for a in holders:
-                remove_liquidity(st, p, int(a), st.lp_shares[a, p] * frac)
+                # Credit the withdrawn tokens: LPs fleeing a pool keep their
+                # assets.  (Burning the shares without paying out would destroy
+                # value and silently penalise every LP in a crisis.)
+                out_a, out_b = remove_liquidity(st, p, int(a), st.lp_shares[a, p] * frac)
+                st.balances[a, ta] += out_a
+                st.balances[a, tb] += out_b
             # Protocol-owned (locked) liquidity flees too: burn reserves pro-rata.
             locked = float(st.pool_shares[p] - st.lp_shares[:, p].sum())
             if locked > EPS and st.pool_shares[p] > EPS:
@@ -304,8 +310,9 @@ class BlockchainWorld:
             if pool is not None:
                 holder = int(np.argmax(st.balances[:, k]))
                 amt = float(st.balances[holder, k]) * float(0.3 + 0.5 * rng.random()) * mag
+                side = 0 if cfg.pools[pool][0] == k else 1
+                amt = min(amt, float(st.reserves[pool, side]) * float(cfg.max_swap_frac))
                 if amt > 0:
-                    side = 0 if cfg.pools[pool][0] == k else 1
                     dy, _, move = apply_swap(st, pool, side, amt)
                     st.balances[holder, k] -= amt
                     other = cfg.pools[pool][1 - side]
@@ -405,6 +412,10 @@ class BlockchainWorld:
                 side = int(act.side) % 2
                 tok_in = cfg.pools[p][side]
                 amt = st.balances[a, tok_in] * frac
+                # Protocol-level price-impact limit (see EnvConfig.max_swap_frac).
+                cap = float(st.reserves[p, side]) * float(cfg.max_swap_frac)
+                capped = amt > cap
+                amt = min(amt, cap)
                 if amt <= 1e-12:
                     return fail("zero_size")
                 dy, swap_fee, move = apply_swap(st, p, side, amt)
@@ -413,7 +424,7 @@ class BlockchainWorld:
                 st.balances[a, tok_in] -= amt
                 st.balances[a, cfg.pools[p][1 - side]] += dy
                 detail = {"pool": p, "side": side, "amount_in": amt,
-                          "amount_out": dy, "move": move}
+                          "amount_out": dy, "move": move, "capped": capped}
 
             elif at == ActionType.ADD_LIQUIDITY:
                 p = int(act.target) % cfg.n_pools

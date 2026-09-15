@@ -79,13 +79,16 @@ class JEPAModule(WorldModelModule):
         a = self.act_emb(b["act_hist"])
         prev = torch.cat([torch.zeros_like(a[:, :1]), a[:, :-1]], dim=1)
         h = self.ctx(torch.cat([b["obs_hist"], prev], dim=-1))[:, -1]
-        return {"z": self.to_latent(h)}
+        return {"z": self.to_latent(h), "obs_prev": b["obs_hist"][:, -1]}
 
     def imagine(self, state: LatentState, action: torch.Tensor) -> LatentState:
         z = self.predictor(torch.cat([state["z"], self.act_emb(action)], dim=-1))
-        return {"z": z}
+        out = {"z": z}
+        if "obs_prev" in state:
+            out["obs_prev"] = state["obs_prev"]
+        return out
 
-    def readout(self, state: LatentState) -> Dict[str, torch.Tensor]:
+    def _readout_raw(self, state: LatentState) -> Dict[str, torch.Tensor]:
         z = state["z"]
         # Decoder gradients are blocked so that reconstruction cannot shape the
         # representation -- otherwise this stops being a JEPA.

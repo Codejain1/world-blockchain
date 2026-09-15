@@ -72,18 +72,25 @@ class RSSMModule(WorldModelModule):
             prior = self._dist(self.prior_net(h))
             e = self.obs_enc(obs[:, i])
             post = self._dist(self.post_net(torch.cat([h, e], dim=-1)))
-            s = post.rsample()
+            s = post.rsample() if self.training else post.mean
             kl_acc = kl_acc + self._kl(post, prior)
-        return {"h": h, "s": s, "kl": kl_acc / max(H, 1)}
+        return {"h": h, "s": s, "kl": kl_acc / max(H, 1),
+                "obs_prev": obs[:, -1]}
 
     def imagine(self, state: LatentState, action: torch.Tensor) -> LatentState:
         h = self.cell(torch.cat([state["s"], self.act_emb(action)], dim=-1), state["h"])
         prior = self._dist(self.prior_net(h))
-        s = prior.rsample()
-        return {"h": h, "s": s, "kl": state.get(
-            "kl", torch.zeros((), device=h.device))}
+        # Sample during training (the KL term needs it); use the mode at
+        # inference so evaluation and planning are reproducible.  Sampling at
+        # plan time would make two identical states give different plans, which
+        # would confound every comparison in the benchmark.
+        s = prior.rsample() if self.training else prior.mean
+        out = {"h": h, "s": s, "kl": state.get("kl", torch.zeros((), device=h.device))}
+        if "obs_prev" in state:
+            out["obs_prev"] = state["obs_prev"]
+        return out
 
-    def readout(self, state: LatentState) -> Dict[str, torch.Tensor]:
+    def _readout_raw(self, state: LatentState) -> Dict[str, torch.Tensor]:
         f = self._feat(state)
         return {"obs": self.dec_obs(f), "reward": self.dec_reward(f).squeeze(-1),
                 "event_logit": self.dec_event(f)}

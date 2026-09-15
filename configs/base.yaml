@@ -1,0 +1,114 @@
+# Base configuration. Everything is overridable from the CLI with --set a.b=c.
+experiment:
+  name: base
+  seed: 0
+  out_dir: results/base
+  notes: ""
+
+data:
+  dir: datasets/main
+  history: 8          # observation budget: identical for every system
+  horizon: 6          # imagination / long-horizon depth
+  max_train_episodes: null
+  max_val_episodes: null
+
+train:
+  # Equal optimisation budget for every learned system: epochs x batches.
+  # Wall-clock differs between architectures and is reported separately.
+  epochs: 15
+  batch_size: 256
+  max_batches_per_epoch: 150
+  val_batches: 30
+  lr: 1.0e-3
+  weight_decay: 1.0e-5
+  grad_clip: 1.0
+  patience: 5
+  device: cpu
+  seed: 0
+
+models:
+  predictive:
+    - persistence
+    - ar
+    - linear
+    - gbdt
+    - mlp
+    - transformer
+    - gnn
+    - obsspace
+    - wm_rssm
+    - wm_jepa
+    - wm_transformer
+    - wm_graph
+    - wm_rssm_1step
+  overrides:
+    gnn: {d_model: 48, n_gnn_layers: 1}
+    wm_graph: {d_model: 48, n_gnn_layers: 1, n_dyn_layers: 2}
+    gbdt: {n_estimators: 120, max_samples: 40000, top_k_targets: 24}
+
+eval:
+  n_samples: 5000
+  horizons: [1, 2, 4, 6]
+  splits:
+    - test_iid
+    - ood_liquidity_crisis
+    - ood_unseen_agents
+    - ood_coordinated_attack
+    - ood_token_economics
+    - ood_amm_params
+    - ood_novel_mechanism
+    - ood_shock_storm
+
+counterfactual:
+  scenarios: [iid, liquidity_crisis, unseen_agents, novel_mechanism]
+  n_episodes: 3
+  n_probes: 6
+  horizon: 6
+  burn_in: 40
+  stride: 20
+  kinds: [substitute, removal]
+  seed_base: 700000
+
+control:
+  scenarios: [iid, liquidity_crisis, unseen_agents, novel_mechanism, shock_storm]
+  n_episodes: 4
+  steps: 160
+  seed_base: 800000
+  policies:
+    - noop
+    - random
+    - buy_and_hold
+    - memory_only
+    - llm
+    - planner_no_model
+    - wm_greedy
+    - wm_plan
+    - wm_plan_memory
+    - unified
+    - unified_no_memory
+    - unified_no_rollout
+    - oracle_plan
+  primary_world_model: wm_rssm
+
+planner:
+  horizon: 6
+  n_candidates: 48
+  n_iters: 3
+  n_elites: 8
+  gamma: 0.95
+  risk_lambda: 0.0
+  method: cem
+  seed: 0
+
+oracle_planner:
+  horizon: 3
+  n_candidates: 6
+  gamma: 0.95
+  seed: 0
+
+llm:
+  provider: anthropic      # degrades to the labelled offline surrogate with no key
+  model: claude-opus-5
+  max_tokens: 400
+  temperature: 0.0
+  cache_dir: datasets/llm_cache

@@ -77,3 +77,48 @@ class OracleSimulatorPlanner:
             if score > best_score:
                 best_score, best_a = score, int(a0)
         return best_a, {"score": best_score, "method": "oracle_sim"}
+
+
+# --------------------------------------------------------------------------
+class OraclePlannerPolicy:
+    """:class:`~bwm.models.base.Policy` wrapper around the oracle planner.
+
+    This is the only system in the lab with simulator access at decision time,
+    and the harness must construct its context with ``allow_simulator=True``.
+    """
+
+    family = "oracle"
+
+    def __init__(self, action_space, cfg: Optional[OracleConfig] = None,
+                 name: str = "oracle_sim_planner") -> None:
+        from ..evaluation.compute import ComputeMeter
+        self.name = name
+        self.planner = OracleSimulatorPlanner(action_space, cfg)
+        self.meter = ComputeMeter(name=name)
+        self.planner.meter = self.meter
+
+    def reset(self, episode_seed: Optional[int] = None) -> None:
+        self.planner.reset(episode_seed)
+
+    def act(self, ctx) -> int:
+        import time
+        if ctx.world is None or not ctx.allow_simulator:
+            raise RuntimeError("OraclePlannerPolicy requires simulator access; "
+                               "construct the context with allow_simulator=True")
+        t0 = time.perf_counter()
+        a, _ = self.planner.plan(ctx.world, ctx.agent, ctx.feasible)
+        self.meter.add_inference(time.perf_counter() - t0, 1)
+        return int(a)
+
+    def observe_outcome(self, ctx, action, reward, next_obs, events) -> None:
+        return None
+
+    def n_params(self) -> int:
+        return 0
+
+    def info(self):
+        from ..models.base import ModelInfo
+        return ModelInfo(name=self.name, family="oracle", n_params=0,
+                         notes="privileged: plans with the true simulator",
+                         extra={"oracle_sim_steps": int(self.meter.oracle_sim_steps),
+                                "planner": self.planner.cfg.to_dict()})

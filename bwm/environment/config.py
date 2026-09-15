@@ -89,6 +89,17 @@ class EnvConfig:
     pool_depth_usd: List[float] = field(default_factory=lambda: [1.8e7, 7.5e6, 4.5e6, 2.4e6])
     #: multiplies all pool depths -- the knob for "different liquidity structure".
     liquidity_scale: float = 1.0
+    #: Maximum size of a single swap, as a fraction of the input-side reserve.
+    #:
+    #: Without this cap a thin pool can be dislocated by tens of times in one
+    #: block: the governance token has no lending market, so arbitrageurs cannot
+    #: short it and cannot correct an over-price, while on the other side they
+    #: (and the leverage loop) push far past the fair price.  Net worth is marked
+    #: at the protocol oracle, so a dislocated pool becomes free money for anyone
+    #: who can see it -- which a true-simulator planner can.  Capping per-trade
+    #: price impact is both realistic (routers and desks enforce slippage limits)
+    #: and enough to keep the AMM tethered to the oracle.
+    max_swap_frac: float = 0.15
 
     # --- lending --------------------------------------------------------
     base_rate: float = 0.01

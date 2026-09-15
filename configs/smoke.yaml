@@ -1,0 +1,40 @@
+# Fast end-to-end run used by tests and for debugging the full pipeline.
+_base_: base.yaml
+
+experiment:
+  name: smoke
+  out_dir: results/smoke
+
+data:
+  max_train_episodes: 12
+  max_val_episodes: 4
+
+train:
+  epochs: 2
+  max_batches_per_epoch: 8
+  val_batches: 3
+
+models:
+  predictive: [persistence, ar, linear, mlp, transformer, obsspace, wm_rssm, wm_jepa]
+
+eval:
+  n_samples: 400
+  horizons: [1, 3, 6]
+  splits: [test_iid, ood_liquidity_crisis, ood_novel_mechanism]
+
+counterfactual:
+  scenarios: [iid, liquidity_crisis]
+  n_episodes: 1
+  n_probes: 3
+  kinds: [substitute, removal]
+
+control:
+  scenarios: [iid, liquidity_crisis]
+  n_episodes: 2
+  steps: 48
+  policies: [noop, random, llm, wm_plan, unified, oracle_plan]
+
+planner:
+  horizon: 4
+  n_candidates: 16
+  n_iters: 2

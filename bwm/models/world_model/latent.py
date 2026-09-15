@@ -61,7 +61,8 @@ class _TfmDynamicsModule(WorldModelModule):
         z = z[:, -self.ctx_len:]
         pad = torch.zeros(z.shape[0], z.shape[1], self.act_emb.embedding_dim,
                           device=z.device)
-        return {"zs": z, "as": pad, "z": z[:, -1]}
+        return {"zs": z, "as": pad, "z": z[:, -1],
+                "obs_prev": b["obs_hist"][:, -1]}
 
     def imagine(self, state: LatentState, action: torch.Tensor) -> LatentState:
         ae = self.act_emb(action).unsqueeze(1)
@@ -76,9 +77,12 @@ class _TfmDynamicsModule(WorldModelModule):
         as_ = torch.cat([state["as"][:, 1:], ae], dim=1) \
             if state["as"].shape[1] >= self.ctx_len else \
             torch.cat([state["as"], ae], dim=1)
-        return {"zs": zs, "as": as_[:, -zs.shape[1]:], "z": z}
+        out = {"zs": zs, "as": as_[:, -zs.shape[1]:], "z": z}
+        if "obs_prev" in state:
+            out["obs_prev"] = state["obs_prev"]
+        return out
 
-    def readout(self, state: LatentState) -> Dict[str, torch.Tensor]:
+    def _readout_raw(self, state: LatentState) -> Dict[str, torch.Tensor]:
         z = state["z"]
         return {"obs": self.dec_obs(z), "reward": self.dec_reward(z).squeeze(-1),
                 "event_logit": self.dec_event(z)}
@@ -134,7 +138,7 @@ class _GraphDynamicsModule(WorldModelModule):
         out, _ = self.time_mix(seq)
         hN = out[:, -1].reshape(B, N, self.d_model)
         hN = hN + self.flat_mix(b["obs_hist"][:, -1]).unsqueeze(1)
-        return {"h": hN}
+        return {"h": hN, "obs_prev": b["obs_hist"][:, -1]}
 
     def imagine(self, state: LatentState, action: torch.Tensor) -> LatentState:
         h = state["h"]
@@ -145,9 +149,12 @@ class _GraphDynamicsModule(WorldModelModule):
         h = h + inj
         for blk in self.dyn_blocks:
             h = blk(h, self.edge_index, self.edge_feat)
-        return {"h": h}
+        out = {"h": h}
+        if "obs_prev" in state:
+            out["obs_prev"] = state["obs_prev"]
+        return out
 
-    def readout(self, state: LatentState) -> Dict[str, torch.Tensor]:
+    def _readout_raw(self, state: LatentState) -> Dict[str, torch.Tensor]:
         z = self._pool(state["h"])
         return {"obs": self.dec_obs(z), "reward": self.dec_reward(z).squeeze(-1),
                 "event_logit": self.dec_event(z)}
@@ -186,6 +193,8 @@ class _ObsSpaceModule(WorldModelModule):
     the control that separates "world model" from "multi-step training".
     """
 
+    residual_decode = False     # this model already predicts residuals internally
+
     def __init__(self, obs_dim: int, n_actions: int, n_events: int, history: int,
                  hidden: int = 256, n_layers: int = 3, act_emb: int = 32) -> None:
         super().__init__()
@@ -210,7 +219,7 @@ class _ObsSpaceModule(WorldModelModule):
         return {"win": torch.cat([win[:, 1:], nxt.unsqueeze(1)], dim=1),
                 "z": nxt, "feat": h}
 
-    def readout(self, state: LatentState) -> Dict[str, torch.Tensor]:
+    def _readout_raw(self, state: LatentState) -> Dict[str, torch.Tensor]:
         h = state["feat"]
         return {"obs": state["z"], "reward": self.dec_reward(h).squeeze(-1),
                 "event_logit": self.dec_event(h)}
