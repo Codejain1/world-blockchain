@@ -1,0 +1,50 @@
+[
+  {
+    "model": "obsspace",
+    "latent_dim": 112,
+    "latent_std": 0.7698507308959961,
+    "effective_dim": 28.407443784356595,
+    "action_sensitivity": 0.013439509086310863,
+    "action_sensitivity_rel": 0.18940047362966597
+  },
+  {
+    "model": "wm_rssm",
+    "latent_dim": 224,
+    "latent_std": 0.3286643326282501,
+    "effective_dim": 3.612610612152782,
+    "action_sensitivity": 0.0071229832246899605,
+    "action_sensitivity_rel": 0.8297304101652045
+  },
+  {
+    "model": "wm_jepa",
+    "latent_dim": 128,
+    "latent_std": 0.6101502776145935,
+    "effective_dim": 24.05693870453302,
+    "action_sensitivity": 0.004288228694349527,
+    "action_sensitivity_rel": 0.1335216711338683
+  },
+  {
+    "model": "wm_transformer",
+    "latent_dim": 128,
+    "latent_std": 0.7045313119888306,
+    "effective_dim": 9.265707464033168,
+    "action_sensitivity": 0.00396582018584013,
+    "action_sensitivity_rel": 0.05456406583080577
+  },
+  {
+    "model": "wm_graph",
+    "latent_dim": 960,
+    "latent_std": 0.7639163732528687,
+    "effective_dim": 9.306463406638153,
+    "action_sensitivity": 0.019355684518814087,
+    "action_sensitivity_rel": 0.2799449824699984
+  },
+  {
+    "model": "wm_rssm_1step",
+    "latent_dim": 224,
+    "latent_std": 0.28676632046699524,
+    "effective_dim": 4.619596884347307,
+    "action_sensitivity": 0.009463171474635601,
+    "action_sensitivity_rel": 0.23796360265088914
+  }
+]
