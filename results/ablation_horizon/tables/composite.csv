@@ -1,0 +1,7 @@
+system,composite,coverage,interpolation,extrapolation,event_calibration,counterfactual,long_horizon,planning
+persistence,0.0,0.8333333333333334,0.0,0.0,0.0,0.0,0.0,
+ar,0.0,0.8333333333333334,0.0,0.0,0.0,0.0,0.0,
+wm_rssm,0.022819952480479255,1.0,0.0,0.0,0.0,0.13691971488287552,0.0,0.0
+wm_rssm_1step,0.0,0.8333333333333334,0.0,0.0,0.0,0.0,0.0,
+policy:noop,0.0,0.16666666666666666,,,,,,0.0
+policy:wm_plan,0.022819952480479255,1.0,0.0,0.0,0.0,0.13691971488287552,0.0,0.0

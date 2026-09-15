@@ -1,0 +1,2 @@
+policy,mean_diff,ci_lo,ci_hi,p_value,significant_05,n_pairs
+wm_plan,-0.0324648973574133,-0.06946884671486764,0.004539052000041045,1.0,False,2

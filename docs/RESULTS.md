@@ -24,6 +24,7 @@ was seen, and are evaluated mechanically by `bwm/evaluation/verdict.py`.
 |---|---|---|
 | environment rewards dynamics knowledge | **yes** | true-simulator planner beats do-nothing by **+0.189** return |
 | latent state beats the same objective without it | **yes** | `wm_rssm` counterfactual skill **+0.144** vs `obsspace` **−0.031** |
+| the multi-step objective buys the causal signal | **yes** | L=6 **+0.137** vs L=1 **−0.009**, equal regularisation (§4.1) |
 | anything beyond sequence modelling | **yes** | `wm_graph` **+0.057** vs `transformer` **−0.043** at the deepest horizon |
 | world model beats the reasoner (control) | **yes** | **+0.167** return, p = 0.028, n = 20 |
 | planning beats one-step greedy | **no** | **−0.010** return, p = 0.63 |
@@ -197,6 +198,42 @@ Three things matter here:
    structure and no idea when that structure stops applying. Averaging to −3.02
    describes neither mode.
 
+### 4.1 Does the multi-step objective buy the causal signal? (corrected ablation)
+
+The main run trained `wm_rssm_1step` with 4.7x more KL than `wm_rssm`, so its
+numbers conflated "shorter horizon" with "more regularisation". Both arms were
+retrained under identical weighting (`configs/ablation_horizon.yaml`,
+`results/ablation_horizon/`). Only the horizon differs.
+
+| metric | L = 6 | L = 1 | difference |
+|---|---|---|---|
+| **counterfactual skill** | **+0.137** | **−0.009** | **+0.146** |
+| decision-state, in-distribution | −0.616 | −0.255 | −0.360 |
+| — agent group | +0.194 | +0.058 | +0.136 |
+| — protocol group | −0.682 | −0.281 | −0.401 |
+| decision-state, OOD mean | −0.102 | −0.013 | −0.089 |
+
+**The open-loop objective trades one-step accuracy for causal understanding.**
+Training to roll six steps forward costs 0.36 of one-step decision-state skill
+and buys 0.146 of counterfactual skill. The one-step arm is the better one-step
+predictor, which is exactly what it was optimised for; it has essentially no
+causal signal (−0.009, i.e. no better than "the action changes nothing").
+
+The trade lands unevenly across channels: multi-step training *helps* on the
+agent's own balance sheet (+0.136) and *hurts* on protocol state (−0.401). The
+horizon pushes the model to model its own action's consequences at the expense of
+market dynamics — the same dissociation seen in §3, now shown to be caused by the
+objective rather than merely correlated with architecture.
+
+**A correction to an earlier reading.** When the corrected arms were trained,
+their *validation losses* came out nearly identical (1.5388 vs 1.4962, against
+0.7508 vs 1.4799 in the main run), and I took that to mean the apparent horizon
+effect had been mostly a confound. That was wrong as a general statement. It held
+for validation loss only. On the benchmark metrics the horizon effect is real and
+almost unchanged by the correction — the counterfactual gap is +0.143 confounded
+and +0.146 corrected. The confound inflated the *loss* gap, not the *capability*
+gap, and validation loss was simply the wrong quantity to read it from.
+
 ### Why: action sensitivity predicts counterfactual skill
 
 Representation diagnostics (`results/main/diagnostics.json`) explain the ordering
@@ -283,12 +320,10 @@ Stated plainly, because several of them bound what the results can mean.
 2. **The unified result measures a broken gate, not a broken architecture.**
    See §2. LinUCB over three arms cannot be identified from ~160 within-episode
    decisions.
-3. **The horizon ablation is confounded.** `wm_rssm_1step` was trained before a
-   fix that made the regulariser weight horizon-independent; it carried 4.7x more
-   KL than `wm_rssm`, so its numbers conflate "shorter horizon" with "more
-   regularisation". `configs/ablation_horizon.yaml` reruns both arms cleanly.
-   The load-bearing control for the same question — `obsspace`, same objective,
-   no latent — is unaffected.
+3. **The horizon ablation was confounded in the main run and has been rerun.**
+   The main run's `wm_rssm_1step` carried 4.7x more KL than `wm_rssm`. Both arms
+   were retrained under equal weighting; see §4.1. The conclusion survived, and
+   the main-run figures for that arm should be read from §4.1 instead.
 4. **`wm_graph` had ~3x fewer parameters** (297k vs 463k–902k) because its
    training cost forced a smaller configuration. Where it underperforms, capacity
    is a live alternative explanation.
@@ -357,4 +392,7 @@ to prevent.
 3. Run with real LLM credentials to test the leg that is currently untestable.
 4. Train longer. 2250 gradient steps is a small budget, and the +0.244 oracle gap
    is the prize for closing it.
-5. Run `configs/ablation_horizon.yaml` for the clean horizon isolation.
+5. Reduce `kl_weight`. The corrected ablation charges the regulariser at its
+   configured value, which is 4.7x the main run's effective strength, and RSSM
+   was already collapsed at the weaker setting. Both this and item 2 point the
+   same way.
