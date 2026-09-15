@@ -70,6 +70,9 @@ class BlockchainWorld:
         self._init_base_fee: float = cfg.init_base_fee
         self._init_net_worth: Optional[np.ndarray] = None
         self._last_liquidations: int = 0
+        #: cluster label per agent, published by the population so that the flat
+        #: observation and the graph view expose the same aggregates.
+        self.agent_types: Optional[np.ndarray] = None
         self.reset()
 
     # ------------------------------------------------------------------
@@ -156,8 +159,10 @@ class BlockchainWorld:
         self._init_base_fee = float(cfg.init_base_fee)
         self._last_liquidations = 0
         self.trace = []
-        if self.population is not None and hasattr(self.population, "reset"):
-            self.population.reset(self)
+        if self.population is not None:
+            self.agent_types = getattr(self.population, "agent_types", None)
+            if hasattr(self.population, "reset"):
+                self.population.reset(self)
         return st
 
     # ------------------------------------------------------------------
@@ -213,6 +218,7 @@ class BlockchainWorld:
         clone._init_net_worth = (None if self._init_net_worth is None
                                  else self._init_net_worth.copy())
         clone._last_liquidations = int(self._last_liquidations)
+        clone.agent_types = self.agent_types
         return clone
 
     def snapshot(self) -> WorldState:

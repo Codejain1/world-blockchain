@@ -79,6 +79,14 @@ class ObservationBuilder:
             "frac_unhealthy", "agg_leverage", "bad_debt_frac", "depeg_dev",
             "time_frac", "pop_cash_frac", "pop_lev_mean",
         ]
+        # Per-cluster aggregates.  These exist so that the flat vector and the
+        # graph view carry *identical information* -- the graph then differs only
+        # in the structure it exposes, never in what it knows.  Any advantage a
+        # graph model shows is therefore an inductive-bias effect, not an
+        # information advantage.
+        for c in range(self.n_clusters):
+            names += [f"clu{c}_count", f"clu{c}_wealth", f"clu{c}_unhealthy",
+                      f"clu{c}_borrow"]
         return names
 
     def _build_agent_names(self) -> List[str]:
@@ -196,7 +204,31 @@ class ObservationBuilder:
             float(cash / max(tot_nw, EPS)),
             float(tot_bor / max(tot_nw, EPS)),
         ]
+        out.extend(self._cluster_features(world, nw, hf))
         return np.asarray(out, dtype=np.float32)
+
+    def _cluster_features(self, world, nw: np.ndarray, hf: np.ndarray) -> List[float]:
+        """Aggregate statistics per agent cluster (shared by flat and graph views)."""
+        cfg, st = self.cfg, world.state
+        types = getattr(world, "agent_types", None)
+        if types is None:
+            types = np.zeros(cfg.n_agents, dtype=np.int64)
+        types = np.asarray(types) % self.n_clusters
+        scale = max(world._init_tvl, EPS)
+        bor = (st.borrowed * st.borrow_index * st.oracle_price).sum(axis=1)
+        out: List[float] = []
+        for c in range(self.n_clusters):
+            m = types == c
+            if not np.any(m):
+                out += [0.0, 0.0, 0.0, 0.0]
+                continue
+            out += [
+                float(m.sum()) / max(cfg.n_agents, 1),
+                float(np.maximum(nw[m], 0.0).sum() / scale),
+                float(np.mean(hf[m] < 1.0)),
+                float(bor[m].sum() / scale),
+            ]
+        return out
 
     def agent_features(self, world, agent: int) -> np.ndarray:
         cfg, st = self.cfg, world.state
@@ -322,7 +354,8 @@ class ObservationBuilder:
             nf[i, 3] = float(world.collateral_factor[k])
             nt[i] = self.NODE_MARKET
 
-        types = agent_types if agent_types is not None else np.zeros(cfg.n_agents, dtype=int)
+        types = agent_types if agent_types is not None else getattr(
+            world, "agent_types", np.zeros(cfg.n_agents, dtype=int))
         nw = world.net_worth()
         hf = world.health_factor()
         for c in range(C):
