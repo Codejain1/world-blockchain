@@ -1,0 +1,100 @@
+control:
+  n_episodes: 2
+  policies:
+  - noop
+  - wm_plan
+  primary_world_model: wm_rssm
+  scenarios:
+  - iid
+  seed_base: 800000
+  steps: 120
+counterfactual:
+  burn_in: 40
+  horizon: 6
+  kinds:
+  - substitute
+  - removal
+  n_episodes: 3
+  n_probes: 6
+  scenarios:
+  - iid
+  - liquidity_crisis
+  - novel_mechanism
+  seed_base: 700000
+  stride: 20
+data:
+  dir: datasets/main
+  history: 8
+  horizon: 6
+  max_train_episodes: null
+  max_val_episodes: null
+eval:
+  horizons:
+  - 1
+  - 2
+  - 4
+  - 6
+  n_samples: 5000
+  splits:
+  - test_iid
+  - ood_liquidity_crisis
+  - ood_unseen_agents
+  - ood_coordinated_attack
+  - ood_token_economics
+  - ood_amm_params
+  - ood_novel_mechanism
+  - ood_shock_storm
+experiment:
+  name: ablation_horizon
+  notes: 'Clean horizon ablation: identical models, identical regulariser weight.'
+  out_dir: results/ablation_horizon
+  seed: 0
+llm:
+  cache_dir: datasets/llm_cache
+  max_tokens: 400
+  model: claude-opus-5
+  provider: anthropic
+  temperature: 0.0
+models:
+  overrides:
+    gbdt:
+      max_samples: 40000
+      n_estimators: 120
+      top_k_targets: 24
+    gnn:
+      d_model: 48
+      n_gnn_layers: 1
+    wm_graph:
+      d_model: 48
+      n_dyn_layers: 2
+      n_gnn_layers: 1
+  predictive:
+  - persistence
+  - ar
+  - wm_rssm
+  - wm_rssm_1step
+oracle_planner:
+  gamma: 0.95
+  horizon: 3
+  n_candidates: 6
+  seed: 0
+planner:
+  gamma: 0.95
+  horizon: 6
+  method: cem
+  n_candidates: 48
+  n_elites: 8
+  n_iters: 3
+  risk_lambda: 0.0
+  seed: 0
+train:
+  batch_size: 256
+  device: cpu
+  epochs: 15
+  grad_clip: 1.0
+  lr: 0.001
+  max_batches_per_epoch: 150
+  patience: 5
+  seed: 0
+  val_batches: 30
+  weight_decay: 1.0e-05

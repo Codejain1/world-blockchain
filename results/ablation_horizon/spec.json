@@ -1,0 +1,9 @@
+{
+  "history": 8,
+  "horizon": 6,
+  "obs_dim": 112,
+  "n_actions": 94,
+  "n_events": 10,
+  "n_nodes": 20,
+  "node_dim": 8
+}
