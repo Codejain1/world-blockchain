@@ -210,3 +210,39 @@ def test_compare_to_reference_pairs_by_episode():
     assert rows[0]["policy"] == "good"
     assert rows[0]["mean_diff"] == pytest.approx(0.1, abs=1e-6)
     assert rows[0]["n_pairs"] == 6
+
+
+# ---------------------------------------------------------------- verdict
+def test_falsification_checks_can_return_not_supported():
+    """The verdict machinery must be able to contradict the hypothesis."""
+    from bwm.evaluation.verdict import evaluate_hypothesis, format_verdict
+    against = {
+        "counterfactual": {"wm_rssm": {"a": {"skill_vs_zero_effect": 0.01}},
+                           "obsspace": {"a": {"skill_vs_zero_effect": 0.09}}},
+        "prediction": {
+            "wm_rssm": {"test_iid": {"long_horizon": {"6": {"decision_skill_vs_best_naive": 0.1}}}},
+            "transformer": {"test_iid": {"long_horizon": {"6": {"decision_skill_vs_best_naive": 0.4}}}}},
+        "control": {"summaries": {"oracle_plan": {"iid": {"total_return": -0.1}},
+                                  "noop": {"iid": {"total_return": 0.0}}},
+                    "head_to_head": [
+                        {"comparison": "wm_plan - llm", "mean_diff": -0.05,
+                         "p_value": 0.2, "n_pairs": 20}]},
+    }
+    v = evaluate_hypothesis(against)
+    verdicts = {c["check"]: c["verdict"] for c in v["checks"]}
+    assert verdicts["latent_vs_same_objective"] == "not_supported"
+    assert verdicts["beyond_sequence_modelling"] == "not_supported"
+    assert verdicts["world_model_beats_reasoner"] == "not_supported"
+    assert verdicts["environment_rewards_dynamics"] == "not_supported"
+    assert "not_supported" in v["counts"] and v["counts"]["not_supported"] >= 4
+    assert "NO" in format_verdict(v)
+
+
+def test_falsification_checks_require_significance_not_just_a_lead():
+    from bwm.evaluation.verdict import evaluate_hypothesis
+    weak = {"control": {"head_to_head": [
+        {"comparison": "unified - wm_plan", "mean_diff": 0.02, "p_value": 0.40,
+         "n_pairs": 8}]}}
+    v = {c["check"]: c["verdict"] for c in evaluate_hypothesis(weak)["checks"]}
+    # A positive but noisy difference must not be reported as support.
+    assert v["unified_beats_world_model"] == "inconclusive"

@@ -9,6 +9,7 @@ from typing import Any, Dict, List, Optional, Sequence
 import numpy as np
 
 from ..evaluation.audit import format_audit
+from ..evaluation.verdict import evaluate_hypothesis, format_verdict
 from ..evaluation.benchmark import COMPONENTS, to_csv, to_markdown
 
 __all__ = ["write_report", "results_markdown"]
@@ -157,6 +158,11 @@ def results_markdown(results: Dict[str, Any]) -> str:
                    "symbolic-reasoning baseline and must not be read as evidence "
                    "about LLM capability."]
         md += [""]
+
+    try:
+        md += [format_verdict(evaluate_hypothesis(results)), ""]
+    except Exception as e:                       # never block the report
+        md += [f"_(falsification checks unavailable: {type(e).__name__}: {e})_", ""]
 
     if results.get("audit"):
         md += [format_audit(results["audit"]), ""]
