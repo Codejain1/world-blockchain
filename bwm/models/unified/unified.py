@@ -111,7 +111,7 @@ class UnifiedPolicy(Policy):
                  planner_cfg: Optional[PlannerConfig] = None, name: str = "unified",
                  use_memory: bool = True, use_planning: bool = True,
                  use_reasoner: bool = True, learn_gate: bool = True,
-                 gate_alpha: float = 0.6, memory_capacity: int = 4096,
+                 gate_alpha: float = 0.4, memory_capacity: int = 4096,
                  needs_graph: bool = False) -> None:
         super().__init__(name)
         self.model = model
@@ -229,8 +229,10 @@ class UnifiedPolicy(Policy):
         return int(a)
 
     def observe_outcome(self, ctx, action, reward, next_obs, events) -> None:
-        r_norm = float(self.normalizer.reward(np.array([reward]))[0])
-        self.tracker.update_action(int(action), r_norm)
+        self.tracker.update_action(int(action), float(reward))
+        # The gate learns from a *self-standardised* reward so the signal is
+        # comparable to its exploration bonus (see ConsequenceTracker.standardize).
+        r_gate = self.tracker.standardize(float(reward))
         self.reasoner.observe_outcome(ctx, action, reward, next_obs, events)
         if self._pending is not None:
             if self._pending["pred_obs"] is not None:
@@ -238,10 +240,10 @@ class UnifiedPolicy(Policy):
                                            - self.normalizer.obs(next_obs))))
                 self.tracker.update_model_error(err)
             if self.learn_gate:
-                self.gate.update(self._pending["arm"], self._pending["x"], r_norm)
+                self.gate.update(self._pending["arm"], self._pending["x"], r_gate)
         if self.use_memory:
             key = self._key(ctx.raw_obs if ctx.raw_obs is not None else ctx.obs_hist[-1])
-            self.memory.add(key, int(action), r_norm, events, int(ctx.t))
+            self.memory.add(key, int(action), r_gate, events, int(ctx.t))
         self._pending = None
 
     def n_params(self) -> int:

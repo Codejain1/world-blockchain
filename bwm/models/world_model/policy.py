@@ -112,12 +112,13 @@ class WorldModelPolicy(Policy):
 
     def observe_outcome(self, ctx, action, reward, next_obs, events) -> None:
         self.tracker.update_action(int(action), float(reward))
+        r_mem = self.tracker.standardize(float(reward))
         if self._pending is not None:
             err = float(np.mean(np.abs(self._pending["obs"] - self.normalizer.obs(next_obs))))
             self.tracker.update_model_error(err)
         if self.memory is not None:
             key = self._key(ctx.raw_obs if ctx.raw_obs is not None else ctx.obs_hist[-1])
-            self.memory.add(key, int(action), float(reward), events, int(ctx.t))
+            self.memory.add(key, int(action), r_mem, events, int(ctx.t))
         self._pending = None
 
     def n_params(self) -> int:

@@ -118,6 +118,10 @@ class ConsequenceTracker:
         self.model_error_n: int = 0
         self.reward_ema: float = 0.0
         self.recent_rewards: Deque[float] = deque(maxlen=64)
+        # Running scale of the reward stream, used to z-score the learning signal.
+        self._rew_m2: float = 0.0
+        self._rew_mean: float = 0.0
+        self._rew_n: int = 0
 
     def reset(self) -> None:
         self.action_value[:] = 0.0
@@ -126,6 +130,9 @@ class ConsequenceTracker:
         self.model_error_n = 0
         self.reward_ema = 0.0
         self.recent_rewards.clear()
+        self._rew_m2 = 0.0
+        self._rew_mean = 0.0
+        self._rew_n = 0
 
     def update_action(self, action: int, reward: float) -> None:
         a = int(action) % self.n_actions
@@ -134,11 +141,37 @@ class ConsequenceTracker:
         self.action_value[a] += lr * (float(reward) - self.action_value[a])
         self.reward_ema = 0.95 * self.reward_ema + 0.05 * float(reward)
         self.recent_rewards.append(float(reward))
+        # Welford update for the running reward scale.
+        self._rew_n += 1
+        d = float(reward) - self._rew_mean
+        self._rew_mean += d / self._rew_n
+        self._rew_m2 += d * (float(reward) - self._rew_mean)
 
     def update_model_error(self, err: float) -> None:
         w = 0.1 if self.model_error_n > 0 else 1.0
         self.model_error_ema = (1 - w) * self.model_error_ema + w * float(err)
         self.model_error_n += 1
+
+    @property
+    def reward_scale(self) -> float:
+        """Running standard deviation of the reward stream (>= a small floor)."""
+        if self._rew_n < 2:
+            return 1.0
+        return float(max(np.sqrt(self._rew_m2 / (self._rew_n - 1)), 1e-9))
+
+    def standardize(self, reward: float, clip: float = 3.0) -> float:
+        """Z-score a reward against its own running scale.
+
+        The bandit gate needs an O(1) learning signal.  Dividing by a *global*
+        dataset reward scale makes the focal agent's per-step rewards far
+        smaller than the UCB exploration bonus, so the gate would never leave
+        exploration and the unified system would be handicapped by its own
+        arbitration layer rather than by its components.
+        """
+        if self._rew_n < 4:
+            return 0.0
+        z = (float(reward) - self._rew_mean) / self.reward_scale
+        return float(np.clip(z, -clip, clip))
 
     @property
     def reward_volatility(self) -> float:
