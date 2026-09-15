@@ -121,7 +121,17 @@ class WorldModelModule(LossModule):
             l_ev = l_ev + w * F.binary_cross_entropy_with_logits(
                 o["event_logit"], b["fut_event"][:, l])
             l_rw = l_rw + w * F.mse_loss(o["reward"], b["fut_reward"][:, l])
-            l_aux = l_aux + w * self.aux_loss(st, b, l)
+            # The architecture regulariser (RSSM's KL, JEPA's VICReg) is charged
+            # at FULL weight, not discounted by the horizon weight.
+            #
+            # It used to be multiplied by w[l].  Because the regulariser is
+            # charged once, at l = 0, that made its effective strength depend on
+            # the horizon: w[0] = 1.00 at L = 1 but only 0.213 at L = 6, so the
+            # one-step ablation regularised its latent 4.7x harder than the
+            # model it was meant to be compared against.  The ablation would then
+            # have measured "more KL" as well as "shorter horizon", which is
+            # exactly the confound it exists to rule out.
+            l_aux = l_aux + self.aux_loss(st, b, l)
         total = wd * l_obs + we * l_ev + wr * l_rw + self.aux_weight * l_aux
         return total, {"obs": float(l_obs.detach()), "event": float(l_ev.detach()),
                        "reward": float(l_rw.detach()),

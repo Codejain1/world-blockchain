@@ -110,3 +110,34 @@ def test_parameter_counts_are_within_one_order_of_magnitude(tiny_set, obs_builde
         counts[n] = build_predictive_model(n, spec, obs_builder, FAST).n_params()
     lo, hi = min(counts.values()), max(counts.values())
     assert hi / max(lo, 1) < 10.0, counts
+
+
+def test_regulariser_weight_is_independent_of_the_training_horizon(tiny_set, obs_builder):
+    """The horizon ablation must change only the horizon.
+
+    The architecture regulariser is charged once (at l=0).  If it were scaled by
+    the discounted horizon weight, a one-step model would be regularised ~4.7x
+    harder than a six-step one, and the ablation would confound "shorter
+    horizon" with "more KL".
+    """
+    import torch
+    ts, vs, spec, nz = tiny_set
+    m = build_predictive_model("wm_rssm", spec, obs_builder, FAST)
+    mod = m.module
+    idx = ts.index(spec.history, spec.horizon)[:24]
+    from bwm.training.trainer import to_torch
+    b = to_torch(ts.batch(idx, spec, nz, with_graph=False))
+
+    # Isolate the regulariser by measuring it directly from the encoded state.
+    torch.manual_seed(0)
+    state = mod.encode(b)
+    kl = float(mod.aux_loss(state, b, 0).detach())
+    assert kl > 0.0, "RSSM produced no KL term to test"
+
+    # Total loss must move by exactly aux_weight * kl regardless of horizon.
+    for horizon in (1, spec.horizon):
+        torch.manual_seed(0)
+        total, logs = mod.loss(b, horizon=horizon)
+        assert logs["aux"] == pytest.approx(kl, rel=0.35), (
+            f"regulariser magnitude depends on horizon={horizon}: "
+            f"{logs['aux']:.5f} vs {kl:.5f}")

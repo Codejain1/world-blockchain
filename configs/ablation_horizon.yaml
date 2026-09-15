@@ -1,0 +1,34 @@
+# Supplementary experiment: a CLEAN isolation of the training horizon.
+#
+# The main run's `wm_rssm_1step` figure was produced before the regulariser
+# weighting was fixed, so it confounded "shorter horizon" with "4.7x more KL"
+# (see bwm/models/world_model/base.py). This config retrains both arms under the
+# corrected weighting so the only difference between them is the horizon.
+#
+#   python scripts/run_experiment.py --config configs/ablation_horizon.yaml \
+#       --stages prediction,counterfactual
+_base_: base.yaml
+
+experiment:
+  name: ablation_horizon
+  out_dir: results/ablation_horizon
+  notes: "Clean horizon ablation: identical models, identical regulariser weight."
+
+models:
+  predictive: [persistence, ar, wm_rssm, wm_rssm_1step]
+
+eval:
+  n_samples: 5000
+  horizons: [1, 2, 4, 6]
+
+counterfactual:
+  scenarios: [iid, liquidity_crisis, novel_mechanism]
+  n_episodes: 3
+  n_probes: 6
+  kinds: [substitute, removal]
+
+control:
+  scenarios: [iid]
+  n_episodes: 2
+  steps: 120
+  policies: [noop, wm_plan]
