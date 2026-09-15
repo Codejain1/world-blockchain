@@ -230,11 +230,39 @@ def run_evaluation(bundle: TrainedBundle, cfg: Config, out_dir: str,
 
     results["tables"] = _build_tables(results, cfg)
     results["composite"] = _build_composites(results, cfg)
+    results["data_audit"] = _data_audit(cfg, verbose)
+    from ..evaluation.audit import audit_results
+    results["audit"] = audit_results(results)
     results["wall_seconds"] = time.perf_counter() - t_start
+    if verbose:
+        sev = results["audit"]["by_severity"]
+        print("audit: " + ", ".join(f"{k}={v}" for k, v in sev.items() if v), flush=True)
 
     with open(os.path.join(out_dir, "results.json"), "w") as fh:
         json.dump(results, fh, indent=2, default=_jsonable)
     return results
+
+
+def _data_audit(cfg: Config, verbose: bool = True, n_episodes: int = 10
+                ) -> Dict[str, Any]:
+    """Contamination checks that run with every experiment, not on request."""
+    from ..data.audit import audit_observation_overlap, audit_split_disjointness
+    d = cfg.get_path("data.dir", "datasets/main")
+    manifest = load_manifest(d)
+    seed_audit = audit_split_disjointness(manifest)
+    train = load_split(d, "train", n_episodes)
+    overlaps: Dict[str, float] = {}
+    for split in manifest["splits"]:
+        if split == "train":
+            continue
+        other = load_split(d, split, n_episodes)
+        overlaps[split] = audit_observation_overlap(train, other)["overlap_frac_b"]
+    if verbose:
+        print(f"  data audit | seeds disjoint={seed_audit['ok']} "
+              f"max duplicate-state overlap={max(overlaps.values(), default=0):.5f}",
+              flush=True)
+    return {"seed_disjoint": seed_audit["ok"], "collisions": seed_audit["collisions"],
+            "observation_overlap": overlaps}
 
 
 def _jsonable(o: Any) -> Any:

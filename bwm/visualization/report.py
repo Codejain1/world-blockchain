@@ -8,6 +8,7 @@ from typing import Any, Dict, List, Optional, Sequence
 
 import numpy as np
 
+from ..evaluation.audit import format_audit
 from ..evaluation.benchmark import COMPONENTS, to_csv, to_markdown
 
 __all__ = ["write_report", "results_markdown"]
@@ -141,6 +142,16 @@ def results_markdown(results: Dict[str, Any]) -> str:
                    "symbolic-reasoning baseline and must not be read as evidence "
                    "about LLM capability."]
         md += [""]
+
+    if results.get("audit"):
+        md += [format_audit(results["audit"]), ""]
+    da = results.get("data_audit")
+    if da:
+        worst = max(da.get("observation_overlap", {}).values(), default=0.0)
+        md += ["## Contamination check", "",
+               f"- episode seeds disjoint across splits: **{da.get('seed_disjoint')}**",
+               f"- largest verbatim observation-row overlap with train: "
+               f"**{worst:.5f}**", ""]
     return "\n".join(md)
 
 
@@ -167,3 +178,8 @@ def write_report(results: Dict[str, Any], out_dir: str, make_plots: bool = True)
             make_all_plots(results, os.path.join(out_dir, "figures"))
         except Exception as e:                       # plotting must never fail a run
             print(f"  (plotting skipped: {type(e).__name__}: {e})")
+    try:
+        from .dashboard import build_dashboard
+        build_dashboard(results, out_dir)
+    except Exception as e:
+        print(f"  (dashboard skipped: {type(e).__name__}: {e})")
