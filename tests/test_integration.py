@@ -182,3 +182,48 @@ def test_audit_flags_an_implausible_result():
     a = audit_results(bad)
     assert any(f["check"] == "implausible_return" for f in a["findings"])
     assert "implausible_return" in format_audit(a)
+
+
+def test_unified_components_are_not_crossed(tiny_set, obs_builder, tiny_env_cfg):
+    """Forcing the gate to one pathway must reproduce that standalone system.
+
+    This is the wiring audit. If the unified system's world model, planner or
+    reasoner were mis-wired -- a different model instance, a different planner
+    config, the reasoner reading normalised instead of raw observations -- then
+    pinning the gate to a single arm would NOT reproduce the corresponding
+    standalone policy. Any divergence here means a capability has been crossed
+    between components, and the unified system's results would be measuring
+    plumbing rather than arbitration.
+    """
+    from bwm.environment.action_space import DiscreteActionSpace
+    from bwm.models.llm.agent import LLMPolicy
+    from bwm.models.llm.client import LLMConfig
+    from bwm.models.unified.unified import UnifiedPolicy
+    from bwm.models.world_model.policy import WorldModelPolicy
+
+    ts, vs, spec, nz = tiny_set
+    wm = build_predictive_model("wm_rssm", spec, obs_builder, FAST)
+    wm.fit(ts, vs, spec, nz)
+    asp = DiscreteActionSpace(tiny_env_cfg)
+    pcfg = PlannerConfig(horizon=3, n_candidates=10, n_iters=2, seed=0)
+    lcfg = LLMConfig(provider="offline", cache_dir=None)
+    names = obs_builder.feature_names
+    env = sample_train_config(838383, n_agents=40, episode_length=56)
+
+    def go(policy):
+        return run_policy_episode(policy, env, nz, history=spec.history, steps=20,
+                                  seed=838383).actions
+
+    # Gate pinned to the planner == the standalone world-model planner.
+    pinned_plan = UnifiedPolicy(wm, asp, nz, LLMPolicy(names, asp.names, lcfg), names,
+                                planner_cfg=pcfg, name="u", use_reasoner=False,
+                                use_memory=False, learn_gate=False)
+    assert np.array_equal(go(pinned_plan),
+                          go(WorldModelPolicy(wm, asp, nz, pcfg, name="wm_plan")))
+
+    # Gate pinned to the reasoner == the standalone reasoner.
+    pinned_reason = UnifiedPolicy(wm, asp, nz, LLMPolicy(names, asp.names, lcfg), names,
+                                  planner_cfg=pcfg, name="u", use_planning=False,
+                                  use_memory=False, learn_gate=False)
+    assert np.array_equal(go(pinned_reason),
+                          go(LLMPolicy(names, asp.names, lcfg, name="llm")))

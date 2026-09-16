@@ -1,0 +1,62 @@
+[
+  {
+    "scenario": "iid",
+    "seed": 800000,
+    "llm": -0.1291037410140456,
+    "wm_plan": -0.008654163991340417,
+    "unified_learned_gate": -0.1548886209175021,
+    "unified_oracle_gate": 0.013549132272601128,
+    "oracle_plan_share": 0.3865546218487395,
+    "pathway_agreement": 0.008333333333333333
+  },
+  {
+    "scenario": "iid",
+    "seed": 800001,
+    "llm": -0.2810363778335168,
+    "wm_plan": -0.02086610047845841,
+    "unified_learned_gate": -0.09584758778131298,
+    "unified_oracle_gate": 0.064084492623806,
+    "oracle_plan_share": 0.226890756302521,
+    "pathway_agreement": 0.008333333333333333
+  },
+  {
+    "scenario": "iid",
+    "seed": 800002,
+    "llm": -0.21391823693742276,
+    "wm_plan": 0.06130471198459819,
+    "unified_learned_gate": 0.03897758071057086,
+    "unified_oracle_gate": 0.0787726417183876,
+    "oracle_plan_share": 0.5128205128205128,
+    "pathway_agreement": 0.025
+  },
+  {
+    "scenario": "liquidity_crisis",
+    "seed": 801000,
+    "llm": -0.5893817416229189,
+    "wm_plan": -0.048343421736179,
+    "unified_learned_gate": -0.3849716683789566,
+    "unified_oracle_gate": 0.0889628678560257,
+    "oracle_plan_share": 0.5583333333333333,
+    "pathway_agreement": 0.0
+  },
+  {
+    "scenario": "liquidity_crisis",
+    "seed": 801001,
+    "llm": -0.7557742607361752,
+    "wm_plan": -0.132797384848631,
+    "unified_learned_gate": -0.2525799018552775,
+    "unified_oracle_gate": 0.06760969012975693,
+    "oracle_plan_share": 0.6722689075630253,
+    "pathway_agreement": 0.008333333333333333
+  },
+  {
+    "scenario": "liquidity_crisis",
+    "seed": 801002,
+    "llm": -0.2088929070847407,
+    "wm_plan": 0.027980064492115892,
+    "unified_learned_gate": -0.08742655934213868,
+    "unified_oracle_gate": 0.3748931288719177,
+    "oracle_plan_share": 0.275,
+    "pathway_agreement": 0.0
+  }
+]

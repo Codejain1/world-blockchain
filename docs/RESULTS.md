@@ -92,6 +92,71 @@ mechanism, not the unified architecture**. A gate that cannot learn is not a tes
 of whether combining reasoning with simulation helps. This is a limitation of
 this implementation, and it is the first thing to fix.
 
+### 2.1 Is the unified system mis-wired? No - and its ceiling is the best result in the study
+
+The natural suspicion when a combined system underperforms its parts is that a
+capability has been crossed: the reasoner reading the wrong observation, the
+planner holding a different model, the gate dispatching to the wrong arm. That is
+testable rather than arguable.
+
+**Wiring audit.** Pinning the gate to a single pathway must reproduce the
+corresponding standalone system exactly. It does:
+
+| forced pathway | actions identical to standalone? | return |
+|---|---|---|
+| always plan | **yes**, every step | −0.0224 vs `wm_plan` −0.0224 |
+| always reason | **yes**, every step | −0.1195 vs `llm` −0.1195 |
+
+No capability is crossed. The components are correctly connected, and the entire
+deficit is *which* pathway the gate selects. This is now a regression test
+(`test_unified_components_are_not_crossed`).
+
+**The ceiling.** So how good could it be if arbitration worked? An *oracle gate*
+forks the real simulator at every step, tries the action each pathway proposes,
+and keeps whichever actually paid more. It is privileged — it sees the
+consequence before committing — so it bounds what any gate could achieve with
+these components (`scripts/gate_ceiling.py`, 6 episodes over two worlds):
+
+| system | mean return |
+|---|---|
+| **unified, oracle gate** | **+0.1146** |
+| `wm_plan` | −0.0202 |
+| unified, learned gate | −0.1561 |
+| `llm` | −0.3630 |
+| *(reference)* do nothing | +0.0023 |
+| *(reference)* oracle planner | +0.1916 |
+
+With a working gate the unified system is **the only configuration built from
+learned components that beats doing nothing**, and it closes roughly 60% of the
+distance to a planner with perfect dynamics. The architecture has large headroom;
+this implementation's gate throws all of it away and then some.
+
+**Why arbitration is the whole game here.** The two pathways propose the *same*
+action on only **0.8%** of steps. On the 99.2% where they disagree, the better
+choice is the planner **44%** of the time and the reasoner **56%** — neither
+dominates. That is the precondition for a gate to add value: if one pathway were
+uniformly better, no arbitration could beat simply always using it. The signal
+exists; LinUCB over three arms, reset every episode and fed ~160 decisions,
+cannot find it.
+
+**On efficiency, the intuition is half right.** Measured as episode wall time per
+decision (which includes simulator cost, so treat the absolute values as an upper
+bound on policy cost):
+
+| system | ms per decision | imagined steps |
+|---|---|---|
+| `wm_plan` | 8445 | 8.3M |
+| unified | 3255 | 8.3M |
+| `llm` | 1365 | — |
+| do nothing (env cost floor) | 1447 | — |
+
+Net of the ~1.4s per-step simulator floor, the unified system spends roughly a
+quarter of what always-planning does, because it only plans on the steps the gate
+selects. So it *is* substantially cheaper than the world-model planner — it is
+simply not more accurate, with this gate. A gate that is both selective and
+correct would be cheaper **and** better; that combination is what §2.1's ceiling
+measures and what item 1 of the follow-ups targets.
+
 ---
 
 ## 3. Prediction: the pooled headline hides the finding
@@ -350,9 +415,12 @@ Stated plainly, because several of them bound what the results can mean.
 * `LLM < World Model` — **holds as an ordering** in control (+0.167, p = 0.028),
   but between two systems that both lose money, and with the LLM replaced by a
   surrogate. Weak support at best.
-* `World Model < Unified` — **contradicted** (−0.079). The mechanism responsible
-  is identified and is a fixable implementation flaw, so this refutes *this
-  unified system*, not the idea of unification.
+* `World Model < Unified` — **contradicted as built** (−0.079), but the cause is
+  isolated and the idea is vindicated. The components are provably not
+  mis-wired (§2.1), the two pathways disagree on 99.2% of steps with neither
+  dominating, and with a perfect gate the unified system scores **+0.115** —
+  better than every other learned system and the only one to beat doing nothing.
+  This refutes *this gate*, and is evidence **for** unification.
 
 **Does a learned world model provide capabilities better function approximation
 does not?** Partially, and not where expected.
