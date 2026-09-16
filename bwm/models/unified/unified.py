@@ -56,14 +56,20 @@ class LinUCBGate:
     def __init__(self, n_arms: int, dim: int, alpha: float = 0.6,
                  ridge: float = 1.0) -> None:
         self.n_arms, self.dim, self.alpha = int(n_arms), int(dim), float(alpha)
+        # Stored explicitly.  It used to be recovered inside reset() by reading
+        # A[0][0, 0], which stops being the ridge after the first update: the
+        # context carries a bias term of 1.0, so that cell grows by one per pull.
+        # reset() therefore restored a prior that compounded every episode
+        # (1 -> 54 -> 107 -> ...), leaving the gate effectively frozen by the end
+        # of an evaluation and making results depend on evaluation order.
+        self.ridge = float(ridge)
         self.A = np.stack([np.eye(dim) * ridge for _ in range(n_arms)])
         self.b = np.zeros((n_arms, dim))
         self.counts = np.zeros(n_arms, dtype=np.int64)
         self.rewards = np.zeros(n_arms)
 
     def reset(self) -> None:
-        ridge = float(self.A[0, 0, 0])
-        self.A = np.stack([np.eye(self.dim) * ridge for _ in range(self.n_arms)])
+        self.A = np.stack([np.eye(self.dim) * self.ridge for _ in range(self.n_arms)])
         self.b[:] = 0.0
         self.counts[:] = 0
         self.rewards[:] = 0.0
@@ -118,13 +124,15 @@ class LinUCBGate:
     def state_dict(self) -> Dict[str, Any]:
         return {"A": self.A.tolist(), "b": self.b.tolist(),
                 "counts": self.counts.tolist(), "rewards": self.rewards.tolist(),
-                "n_arms": self.n_arms, "dim": self.dim, "alpha": self.alpha}
+                "n_arms": self.n_arms, "dim": self.dim, "alpha": self.alpha,
+                "ridge": self.ridge}
 
     def load_state_dict(self, d: Dict[str, Any]) -> "LinUCBGate":
         self.A = np.asarray(d["A"], dtype=np.float64)
         self.b = np.asarray(d["b"], dtype=np.float64)
         self.counts = np.asarray(d["counts"], dtype=np.int64)
         self.rewards = np.asarray(d["rewards"], dtype=np.float64)
+        self.ridge = float(d.get("ridge", self.ridge))
         return self
 
     def usage(self) -> Dict[str, Any]:

@@ -25,6 +25,7 @@ was seen, and are evaluated mechanically by `bwm/evaluation/verdict.py`.
 | environment rewards dynamics knowledge | **yes** | true-simulator planner beats do-nothing by **+0.189** return |
 | latent state beats the same objective without it | **yes** | `wm_rssm` counterfactual skill **+0.144** vs `obsspace` **−0.031** |
 | the multi-step objective buys the causal signal | **yes** | L=6 **+0.137** vs L=1 **−0.009**, equal regularisation (§4.1) |
+| a fitted gate recovers the oracle-gate headroom | **no** | +0.001, p = 0.97; agrees with the oracle 43.7% vs 56.6% for a constant guess (§2.2) |
 | anything beyond sequence modelling | **yes** | `wm_graph` **+0.057** vs `transformer` **−0.043** at the deepest horizon |
 | world model beats the reasoner (control) | **yes** | **+0.167** return, p = 0.028, n = 20 |
 | planning beats one-step greedy | **no** | **−0.010** return, p = 0.63 |
@@ -156,6 +157,83 @@ selects. So it *is* substantially cheaper than the world-model planner — it is
 simply not more accurate, with this gate. A gate that is both selective and
 correct would be cheaper **and** better; that combination is what §2.1's ceiling
 measures and what item 1 of the follow-ups targets.
+
+### 2.2 Trying to fix the gate: a null result, a real bug, and a correction
+
+§2.1 measured an oracle-gate ceiling of +0.115 and I concluded the architecture
+had large headroom that the gate was throwing away. Acting on that produced two
+findings, one of which corrects §2.1.
+
+**The fix did nothing.** The gate was fitted offline on 2560 decisions collected
+on *training* seeds with a uniformly random arm (959 reason / 818 plan / 783
+recall), then evaluated on the held-out control seeds:
+
+| system | mean return |
+|---|---|
+| unified, warm-started gate | −0.1247 |
+| unified, original gate | −0.1258 |
+| `wm_plan` | −0.0520 |
+| `llm` | −0.2185 |
+
+`warmstart − baseline = +0.0011, p = 0.972`. A clean null. And the collapse it
+was meant to cure *was* cured — pathway shares went from 99.4 / 0.6 / 0 to
+36.9 / 30.1 / 33.0 — with no effect whatsoever on return. **Collapse was never
+the cause.**
+
+**Why: the context does not predict which pathway wins.** On 435 decisions where
+the two pathways disagreed, with the oracle forking the simulator to see which
+actually paid:
+
+| quantity | value |
+|---|---|
+| oracle's better arm | plan 56.6% / reason 43.4% |
+| fitted gate agrees with the oracle | **43.7%** |
+| always guessing "plan" would agree | 56.6% |
+| mean advantage of the right choice | $657 per decision |
+| value the gate captured vs always-reason | **−$117 per decision** |
+
+The gate is not merely uninformative, it is *anti*-correlated: it agrees with the
+oracle less often than a constant guess, and destroys value relative to picking
+one pathway and sticking to it. The stakes are large ($657 a decision), so the
+headroom in §2.1 is real — but it is **not reachable from this context**. The
+nine features (model-error EMA, volatility, solvency, basis, memory distance,
+time) do not carry the signal.
+
+**A real bug, in code older than this experiment.** `LinUCBGate.reset()`
+recovered its ridge prior by reading `A[0][0, 0]`. That cell stops being the
+ridge after the first update, because the context's bias term contributes 1.0 per
+pull. The restored prior therefore compounded every episode — 1 → 54 → 107 → 160
+— leaving the gate effectively frozen by the end of an evaluation and making
+results depend on **evaluation order**. Confirmed directly: the same policy on
+the same episode produces different actions on 58 of 80 steps depending on
+whether it ran a prior episode first.
+
+Consequences, stated plainly:
+
+* The main run's `unified*` control figures were order-dependent and should be
+  treated as approximate. `unified_baseline` re-measured in isolation is −0.1258
+  against the main run's −0.1306; the conclusion is unaffected (both are far
+  below `wm_plan`), but the exact numbers are not reproducible without fixing
+  this. Every non-unified policy re-measured **byte-identically**, so nothing
+  else in the study is touched.
+* The bug is fixed (`ridge` is now stored explicitly) with two regression tests:
+  reset is idempotent across episodes, and a gate with history selects
+  identically to a fresh one after reset.
+
+**Correcting §2.1.** I wrote there that "the architecture has large headroom;
+this implementation's gate throws all of it away." The first half stands — the
+oracle ceiling is real. The second half was wrong. The headroom is not
+recoverable by better arbitration over this context; a correctly-fitted,
+non-collapsed gate captures none of it. What §2.1 actually establishes is that
+*outcome information* is worth +0.115 here, not that *arbitration* is.
+
+**What would be worth trying next**, given this: the context is backward-looking
+(an EMA of past model error) where the decision needs a forward-looking signal.
+The obvious candidate is the planner's own predicted advantage for *this* state —
+the score of its best imagined sequence against the score it assigns the
+reasoner's proposed action — plus ensemble disagreement as an uncertainty
+estimate. Both are available at decision time and neither is in the current
+context.
 
 ---
 

@@ -258,3 +258,32 @@ def test_gate_persistence_flag_controls_reset(tiny_env_cfg, fitted_wm):
         u.reset(episode_seed=0)
         kept = int(u.gate.counts.sum()) > 0
         assert kept is expect_kept, f"persist_gate={persist} behaved wrongly"
+
+
+def test_gate_reset_restores_the_original_prior():
+    """reset() must be idempotent across episodes.
+
+    It used to recover the ridge by reading A[0][0, 0], which stops being the
+    ridge after the first update because the context's bias term adds 1.0 per
+    pull. The restored prior then compounded every episode, freezing the gate
+    and making evaluation results depend on episode ORDER.
+    """
+    g = LinUCBGate(3, 9, alpha=0.4, ridge=1.0)
+    x = np.ones(9)
+    for _ in range(3):
+        for _ in range(50):
+            g.update(0, x, 0.1)
+        g.reset()
+        assert g.A[0][0, 0] == pytest.approx(1.0), "ridge drifted across resets"
+        assert g.counts.sum() == 0 and np.allclose(g.b, 0.0)
+
+
+def test_gate_selection_is_order_independent_after_reset():
+    """Two gates given the same episode must agree, regardless of history."""
+    rng = np.random.default_rng(0)
+    warm, fresh = LinUCBGate(3, 9, alpha=0.4), LinUCBGate(3, 9, alpha=0.4)
+    for _ in range(80):                       # give one of them a prior episode
+        warm.update(int(rng.integers(3)), rng.normal(size=9), float(rng.normal()))
+    warm.reset()
+    probe = rng.normal(size=(40, 9)); probe[:, 0] = 1.0
+    assert [warm.select(x) for x in probe] == [fresh.select(x) for x in probe]
