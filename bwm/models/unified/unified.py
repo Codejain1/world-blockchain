@@ -92,6 +92,41 @@ class LinUCBGate:
         self.counts[a] += 1
         self.rewards[a] += float(reward)
 
+    def fit(self, X: np.ndarray, arms: np.ndarray, rewards: np.ndarray) -> "LinUCBGate":
+        """Batch-fit from logged ``(context, arm, reward)`` triples.
+
+        LinUCB's update is additive, so an offline fit is just the online update
+        applied to every logged decision at once.  This is what lets the gate
+        arrive at evaluation already competent, instead of spending the whole
+        episode in exploration -- the same treatment every other learned
+        component gets.
+        """
+        X = np.asarray(X, dtype=np.float64)
+        arms = np.asarray(arms, dtype=np.int64)
+        rewards = np.asarray(rewards, dtype=np.float64)
+        for a in range(self.n_arms):
+            m = arms == a
+            if not np.any(m):
+                continue
+            Xa = X[m]
+            self.A[a] += Xa.T @ Xa
+            self.b[a] += Xa.T @ rewards[m]
+            self.counts[a] += int(m.sum())
+            self.rewards[a] += float(rewards[m].sum())
+        return self
+
+    def state_dict(self) -> Dict[str, Any]:
+        return {"A": self.A.tolist(), "b": self.b.tolist(),
+                "counts": self.counts.tolist(), "rewards": self.rewards.tolist(),
+                "n_arms": self.n_arms, "dim": self.dim, "alpha": self.alpha}
+
+    def load_state_dict(self, d: Dict[str, Any]) -> "LinUCBGate":
+        self.A = np.asarray(d["A"], dtype=np.float64)
+        self.b = np.asarray(d["b"], dtype=np.float64)
+        self.counts = np.asarray(d["counts"], dtype=np.int64)
+        self.rewards = np.asarray(d["rewards"], dtype=np.float64)
+        return self
+
     def usage(self) -> Dict[str, Any]:
         tot = max(int(self.counts.sum()), 1)
         return {"counts": self.counts.tolist(),
@@ -112,7 +147,8 @@ class UnifiedPolicy(Policy):
                  use_memory: bool = True, use_planning: bool = True,
                  use_reasoner: bool = True, learn_gate: bool = True,
                  gate_alpha: float = 0.4, memory_capacity: int = 4096,
-                 needs_graph: bool = False) -> None:
+                 needs_graph: bool = False, persist_gate: bool = False,
+                 gate_explore: float = 0.0, gate_seed: int = 0) -> None:
         super().__init__(name)
         self.model = model
         self.action_space = action_space
@@ -134,13 +170,25 @@ class UnifiedPolicy(Policy):
                                if n.startswith("basis_")})
         self._pending: Optional[Dict[str, Any]] = None
         self.path_log: List[int] = []
+        # Keeping the gate across episodes is the difference between ~53 pulls
+        # per arm and ~1000: LinUCB over a 9-dimensional context cannot be
+        # identified from one episode, which is why the per-episode gate
+        # collapses onto whichever arm it happened to try first.
+        self.persist_gate = bool(persist_gate)
+        #: probability of taking a uniformly random arm -- used only when
+        #: *collecting* data to fit the gate offline, never at evaluation.
+        self.gate_explore = float(gate_explore)
+        self._grng = np.random.Generator(np.random.PCG64(int(gate_seed)))
+        #: logged (context, arm, standardised reward) for offline fitting.
+        self.gate_log: List[Tuple[np.ndarray, int, float]] = []
 
     # ------------------------------------------------------------------
     def reset(self, episode_seed: Optional[int] = None) -> None:
         self.planner.reset(episode_seed)
         self.tracker.reset()
         self.memory.clear()
-        self.gate.reset()
+        if not self.persist_gate:
+            self.gate.reset()
         self.reasoner.reset(episode_seed)
         self._pending = None
         self.path_log = []
@@ -188,7 +236,9 @@ class UnifiedPolicy(Policy):
         raw = ctx.raw_obs if ctx.raw_obs is not None else ctx.obs_hist[-1]
         x = self._context(ctx, raw)
         arms = self._allowed_arms()
-        if self.learn_gate:
+        if self.gate_explore > 0.0 and self._grng.random() < self.gate_explore:
+            arm = int(self._grng.choice(arms))          # data-collection only
+        elif self.learn_gate:
             arm = self.gate.select(x, arms)
         else:
             arm = arms[0]
@@ -239,6 +289,8 @@ class UnifiedPolicy(Policy):
                 err = float(np.mean(np.abs(self._pending["pred_obs"]
                                            - self.normalizer.obs(next_obs))))
                 self.tracker.update_model_error(err)
+            self.gate_log.append((self._pending["x"], int(self._pending["arm"]),
+                                  float(r_gate)))
             if self.learn_gate:
                 self.gate.update(self._pending["arm"], self._pending["x"], r_gate)
         if self.use_memory:

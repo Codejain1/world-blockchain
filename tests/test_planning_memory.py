@@ -216,3 +216,45 @@ def test_unified_ablations_restrict_the_pathways(fitted_wm, tiny_env_cfg):
     assert 2 not in no_mem._allowed_arms()
     assert 1 not in no_roll._allowed_arms()
     assert len(PATHWAYS) == 3
+
+
+def test_gate_offline_fit_recovers_the_better_arm():
+    """A batch-fitted gate must generalise to contexts it was not fitted on."""
+    rng = np.random.default_rng(0)
+    X = rng.normal(size=(600, 9)); X[:, 0] = 1.0
+    arms = rng.integers(0, 3, 600)
+    true = lambda x, a: [0.0, 0.9 * x[1], -0.6][a]
+    rew = np.array([true(x, a) for x, a in zip(X, arms)]) + 0.05 * rng.normal(size=600)
+    g = LinUCBGate(3, 9, alpha=0.4).fit(X, arms, rew)
+
+    Xt = rng.normal(size=(300, 9)); Xt[:, 0] = 1.0
+    chosen = np.array([g.select(x) for x in Xt])
+    best = np.array([int(np.argmax([true(x, a) for a in range(3)])) for x in Xt])
+    assert (chosen == best).mean() > 0.9, "offline-fit gate did not learn the policy"
+
+
+def test_gate_state_round_trips():
+    g = LinUCBGate(3, 9)
+    rng = np.random.default_rng(1)
+    X = rng.normal(size=(50, 9)); X[:, 0] = 1.0
+    g.fit(X, rng.integers(0, 3, 50), rng.normal(size=50))
+    g2 = LinUCBGate(3, 9).load_state_dict(g.state_dict())
+    assert np.allclose(g2.A, g.A) and np.allclose(g2.b, g.b)
+    assert np.array_equal(g2.counts, g.counts)
+
+
+def test_gate_persistence_flag_controls_reset(tiny_env_cfg, fitted_wm):
+    """persist_gate must survive reset(); the default must still clear it."""
+    from bwm.environment.observation import ObservationBuilder
+    model, spec, nz = fitted_wm
+    ob = ObservationBuilder(tiny_env_cfg)
+    asp = DiscreteActionSpace(tiny_env_cfg)
+    reasoner = LLMPolicy(ob.feature_names, asp.names, LLMConfig(provider="offline"))
+    x = np.ones(UnifiedPolicy.GATE_DIM)
+    for persist, expect_kept in ((True, True), (False, False)):
+        u = UnifiedPolicy(model, asp, nz, reasoner, ob.feature_names,
+                          name="u", persist_gate=persist)
+        u.gate.update(1, x, 1.0)
+        u.reset(episode_seed=0)
+        kept = int(u.gate.counts.sum()) > 0
+        assert kept is expect_kept, f"persist_gate={persist} behaved wrongly"
