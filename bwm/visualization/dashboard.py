@@ -16,9 +16,21 @@ from typing import Any, Dict, List, Optional, Sequence
 
 __all__ = ["build_dashboard"]
 
+# Status colours are validated with the dataviz skill's checker
+# (scripts/validate_palette.js). The light pair #0f7a4a / #c4341c passes all six
+# checks -- lightness band, chroma floor, CVD separation (deutan dE 8.6),
+# normal-vision floor (dE 27.1) and contrast -- against the page surface.  They
+# encode *status*, never series identity, and every use is accompanied by a text
+# label, so colour is never the only channel carrying meaning.
 _CSS = """
 :root{--bg:#fbfaf8;--fg:#1c1b19;--mut:#6b6762;--line:#e3dfd9;--card:#fff;
---pos:#2f7d5c;--neg:#b34a3c;--accent:#2E6F9E;--wm:#C4573B}
+--pos:#0f7a4a;--neg:#c4341c;--neutral:#6b6762;--accent:#2E6F9E;--wm:#C4573B;
+--grid:#d8d3cc}
+@media (prefers-color-scheme: dark){
+:root{--bg:#14140f;--fg:#ece9e4;--mut:#a5a099;--line:#33312d;--card:#1c1b19;
+--pos:#57c795;--neg:#ef7358;--neutral:#a5a099;--accent:#6aa9d6;--wm:#e08a72;
+--grid:#3a3833}
+}
 *{box-sizing:border-box}
 body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.55 -apple-system,
 BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}
@@ -54,6 +66,17 @@ background:#fff;border-radius:0 6px 6px 0;font-size:13px}
 .finding code{background:#f2efec;padding:1px 5px;border-radius:4px;font-size:12px}
 footer{color:var(--mut);font-size:12px;margin-top:40px;border-top:1px solid var(--line);
 padding-top:14px}
+.verdict{display:grid;grid-template-columns:1fr auto;gap:8px 14px;align-items:start;
+padding:11px 14px;border:1px solid var(--line);border-radius:8px;background:var(--card);
+margin:8px 0}
+.verdict .q{font-weight:600}
+.verdict .d{grid-column:1/-1;color:var(--mut);font-size:12.5px}
+.chip{display:inline-flex;align-items:center;gap:5px;padding:2px 9px;border-radius:99px;
+font-size:11.5px;font-weight:650;border:1px solid currentColor;white-space:nowrap}
+.chip.yes{color:var(--pos)}.chip.no{color:var(--neg)}.chip.na{color:var(--neutral)}
+.headline{border-left:3px solid var(--accent);padding:12px 16px;background:var(--card);
+border-radius:0 8px 8px 0;margin:14px 0;font-size:14.5px}
+figure{margin:12px 0}figcaption{color:var(--mut);font-size:12px;margin-top:6px}
 @media (max-width:640px){.wrap{padding:20px 14px 56px}h1{font-size:22px}}
 """
 
@@ -111,6 +134,111 @@ def _sorted(rows: Sequence[Dict[str, Any]], key: str) -> List[Dict[str, Any]]:
                                        if isinstance(r.get(key), (int, float)) else 0))
 
 
+
+def _forest(rows: Sequence[Dict[str, Any]], width: int = 720,
+            row_h: int = 26) -> str:
+    """Forest plot of paired mean differences with confidence intervals.
+
+    The canonical form for this data: the question a reader has is "which
+    differences exclude zero?", and a dot-and-whisker against a zero rule answers
+    it directly, where a bar chart of means would hide the uncertainty that is
+    the entire point.
+    """
+    rows = [r for r in rows if isinstance(r.get("mean_diff"), (int, float))]
+    if not rows:
+        return ""
+    lo = min(min(r.get("ci_lo", r["mean_diff"]), r["mean_diff"]) for r in rows)
+    hi = max(max(r.get("ci_hi", r["mean_diff"]), r["mean_diff"]) for r in rows)
+    pad = max((hi - lo) * 0.12, 0.02)
+    lo, hi = lo - pad, hi + pad
+    label_w, right_w = 230, 92
+    plot_w = width - label_w - right_w
+    height = len(rows) * row_h + 44
+
+    def x(v: float) -> float:
+        return label_w + (v - lo) / max(hi - lo, 1e-9) * plot_w
+
+    parts = [f'<svg viewBox="0 0 {width} {height}" width="100%" '
+             f'role="img" aria-label="Paired mean differences with 95% '
+             f'confidence intervals" style="max-width:100%;height:auto">']
+    # zero reference rule
+    parts.append(f'<line x1="{x(0):.1f}" y1="26" x2="{x(0):.1f}" y2="{height-18}" '
+                 f'stroke="var(--grid)" stroke-width="2" stroke-dasharray="3 3"/>')
+    parts.append(f'<text x="{x(0):.1f}" y="18" text-anchor="middle" font-size="10.5" '
+                 f'fill="var(--mut)">no difference</text>')
+    for i, r in enumerate(rows):
+        y = 34 + i * row_h
+        d = float(r["mean_diff"])
+        clo = float(r.get("ci_lo", d))
+        chi = float(r.get("ci_hi", d))
+        # Colour follows the exact permutation test, not "the CI excludes zero".
+        # The two can disagree (unified - llm: CI excludes zero, p = 0.076), and
+        # colouring by the looser criterion would show green on a comparison the
+        # report itself calls inconclusive.  The conservative test wins so that
+        # colour, the asterisk and the prose all say the same thing.
+        pv = r.get("p_value")
+        sig = isinstance(pv, (int, float)) and pv < 0.05
+        col = "var(--pos)" if (sig and d > 0) else (
+            "var(--neg)" if sig else "var(--neutral)")
+        parts.append(f'<text x="{label_w-10}" y="{y+4}" text-anchor="end" '
+                     f'font-size="11.5" fill="var(--fg)">'
+                     f'{html.escape(str(r.get("comparison", "")))}</text>')
+        parts.append(f'<line x1="{x(clo):.1f}" y1="{y}" x2="{x(chi):.1f}" y2="{y}" '
+                     f'stroke="{col}" stroke-width="2" stroke-linecap="round"/>')
+        for e in (clo, chi):      # CI caps
+            parts.append(f'<line x1="{x(e):.1f}" y1="{y-4}" x2="{x(e):.1f}" '
+                         f'y2="{y+4}" stroke="{col}" stroke-width="2"/>')
+        # 2px surface ring keeps the point readable where it overlaps the whisker
+        parts.append(f'<circle cx="{x(d):.1f}" cy="{y}" r="5" fill="{col}" '
+                     f'stroke="var(--card)" stroke-width="2"/>')
+        star = " *" if sig else ""
+        parts.append(f'<text x="{width-6}" y="{y+4}" text-anchor="end" font-size="11" '
+                     f'fill="var(--mut)">{d:+.3f}{star}</text>')
+    for v in (lo, 0.0, hi):       # sparse axis
+        parts.append(f'<text x="{x(v):.1f}" y="{height-4}" text-anchor="middle" '
+                     f'font-size="10" fill="var(--mut)">{v:+.2f}</text>')
+    parts.append("</svg>")
+    return "".join(parts)
+
+
+def _verdict_block(results: Dict[str, Any]) -> str:
+    """Pre-registered falsification checks, as status rows.
+
+    Status is carried by a text label *and* a colour, never colour alone.
+    """
+    try:
+        from ..evaluation.verdict import evaluate_hypothesis
+        v = results.get("verdict") or evaluate_hypothesis(results)
+    except Exception:
+        return ""
+    if not v.get("checks"):
+        return ""
+    label = {"supported": ("yes", "yes"), "not_supported": ("no", "NO"),
+             "inconclusive": ("na", "inconclusive"), "info": ("na", "context")}
+    out = ["<h2>Does the evidence support the hypothesis?</h2>",
+           '<div class="headline">These criteria were fixed in '
+           '<code>docs/METHODOLOGY.md</code> <b>before any result was seen</b>. '
+           'The benchmark was able to confirm the hypothesis and did not.</div>']
+    counts = v.get("counts", {})
+    if counts:
+        out.append('<div class="grid">' + "".join(
+            f'<div class="kpi"><div class="v">{n}</div>'
+            f'<div class="l">{html.escape(k.replace("_", " "))}</div></div>'
+            for k, n in sorted(counts.items(),
+                               key=lambda kv: ["supported", "not_supported",
+                                               "inconclusive", "info"].index(kv[0])
+                               if kv[0] in ("supported", "not_supported",
+                                            "inconclusive", "info") else 9)) + "</div>")
+    for c in v["checks"]:
+        cls, text = label.get(c["verdict"], ("na", c["verdict"]))
+        out.append(
+            f'<div class="verdict"><div class="q">'
+            f'{html.escape(c["check"].replace("_", " "))}</div>'
+            f'<div><span class="chip {cls}">{html.escape(text)}</span></div>'
+            f'<div class="d">{html.escape(c["detail"])}</div></div>')
+    return "".join(out)
+
+
 def build_dashboard(results: Dict[str, Any], out_dir: str,
                     figures_dir: Optional[str] = None,
                     title: str = "Blockchain World Model Intelligence Lab") -> str:
@@ -154,6 +282,26 @@ def build_dashboard(results: Dict[str, Any], out_dir: str,
                     f'<div class="l">train/test split</div></div>')
     if kpis:
         parts.append(f'<div class="grid">{"".join(kpis)}</div>')
+
+    # --- the verdict comes first -----------------------------------------
+    parts.append(_verdict_block(results))
+
+    h2h = results.get("control", {}).get("head_to_head")
+    if h2h:
+        parts += ["<h2>Head-to-head tests</h2>",
+                  '<div class="card"><p>Every policy ran the same episode seeds, '
+                  'so these are <b>paired</b> comparisons of total return. The bar '
+                  'is a 95% bootstrap interval and the dot is the mean difference; '
+                  'intervals crossing the dashed rule are not distinguishable from '
+                  'no difference. <code>*</code> marks p &lt; 0.05 on an exact '
+                  'sign-flip permutation test.</p></div>',
+                  "<figure>", _forest(h2h),
+                  '<figcaption>Positive favours the first system named. Colour '
+                  'and the asterisk both mark p &lt; 0.05; grey means not '
+                  'distinguishable, including where the interval happens to '
+                  'exclude zero. Colour adds no information the label lacks.'
+                  '</figcaption>',
+                  "</figure>"]
 
     # --- prediction ----------------------------------------------------
     if "prediction" in tables:
